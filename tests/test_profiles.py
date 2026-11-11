@@ -156,3 +156,29 @@ def test_load_value_set_and_use_it_as_binding(client):
     assert errors_of(client.post(url, json=obs("red")).json()) == []
     assert "was not found in the value set" in messages_of(client.post(url, json=obs("green")).json()) or \
            "None of the codings provided are in the value set" in messages_of(client.post(url, json=obs("green")).json())
+
+
+# ---- layered profiles: changing a parent refreshes everything derived from it --------------------------
+def test_changing_a_parent_profile_updates_derived_profiles(client):
+    def sd(url, base, diff):
+        return {"resourceType": "StructureDefinition", "id": url.rsplit("/", 1)[-1], "url": url, "name": "P",
+                "status": "active", "kind": "resource", "abstract": False, "type": "Patient",
+                "baseDefinition": base, "derivation": "constraint", "differential": {"element": diff}}
+
+    country = "http://fhir.test.local/country/StructureDefinition/c-patient"
+    org = "http://fhir.test.local/org/h1/StructureDefinition/h1-patient"
+    base = "http://hl7.org/fhir/StructureDefinition/Patient"
+    gender = {"id": "Patient.gender", "path": "Patient.gender", "min": 1}
+    name = {"id": "Patient.name", "path": "Patient.name", "min": 1}
+    birth = {"id": "Patient.birthDate", "path": "Patient.birthDate", "min": 1}
+    assert client.post("/profiles", json=sd(country, base, [gender])).status_code == 200
+    assert client.post("/profiles", json=sd(org, country, [birth])).status_code == 200
+    patient = {"resourceType": "Patient", "text": NARRATIVE, "gender": "male", "birthDate": "2000-01-01"}
+
+    def errors():
+        out = client.post(f"/validate?profile={org}", json=patient).json()
+        return [i["details"]["text"] for i in out["issue"] if i["severity"] == "error"]
+
+    assert errors() == []  # org profile used once, so its snapshot is generated
+    client.post("/profiles", json=sd(country, base, [gender, name]))  # country now also requires a name
+    assert any("Patient.name: minimum required = 1" in e for e in errors())  # without reloading the org profile

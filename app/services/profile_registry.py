@@ -15,14 +15,36 @@ CORE_PREFIX = "http://hl7.org/fhir/StructureDefinition/"
 # ElementDefinition properties the validator never reads. Dropping them keeps RAM low
 # (the R4 core definitions are ~35 MB of JSON otherwise).
 _ELEMENT_DROP = {
-    "mapping", "comment", "requirements", "alias", "example", "isSummary",
-    "meaningWhenMissing", "orderMeaning", "isModifierReason", "short", "definition", "condition",
+    "mapping",
+    "comment",
+    "requirements",
+    "alias",
+    "example",
+    "isSummary",
+    "meaningWhenMissing",
+    "orderMeaning",
+    "isModifierReason",
+    "short",
+    "definition",
+    "condition",
 }
-_SD_DROP = {"text", "mapping", "contact", "publisher", "description", "purpose", "copyright", "useContext", "jurisdiction"}
+_SD_DROP = {
+    "text",
+    "mapping",
+    "contact",
+    "publisher",
+    "description",
+    "purpose",
+    "copyright",
+    "useContext",
+    "jurisdiction",
+}
 _VS_DROP = {"text", "contact", "publisher", "copyright", "purpose"}
 
 
-def slim_structure_definition(sd: dict[str, Any]) -> dict[str, Any]:
+def slim_structure_definition(
+    sd: dict[str, Any], keep_differential: bool = False
+) -> dict[str, Any]:
     for k in _SD_DROP:
         sd.pop(k, None)
     snap = sd.get("snapshot")
@@ -30,7 +52,8 @@ def slim_structure_definition(sd: dict[str, Any]) -> dict[str, Any]:
         for el in snap.get("element", []):
             for k in _ELEMENT_DROP:
                 el.pop(k, None)
-        sd.pop("differential", None)
+        if not keep_differential:
+            sd.pop("differential", None)
     return sd
 
 
@@ -48,8 +71,13 @@ class ProfileRegistry:
         self._trees: dict[int, SnapshotTree] = {}
         self._resource_names: set[str] = set()
         self._core_urls: set[str] = set()
-        self._resource_names.add("DomainResource")  # the Java validator lists the abstract DomainResource too
+        self._resource_names.add(
+            "DomainResource"
+        )  # the Java validator lists the abstract DomainResource too
         self._generating: set[str] = set()
+        self._generated: set[str] = (
+            set()
+        )  # SDs whose snapshot we generated (rebuilt when an ancestor changes)
         self.generation = 0  # bumped on every registration (cache invalidation key)
         if load_base:
             self._load_base_definitions()
@@ -99,13 +127,19 @@ class ProfileRegistry:
                 old = self._sds.get(url)
                 if old is not None:
                     self._trees.pop(id(old), None)
+                self._generated.discard(url)
                 self._sds[url] = res
+                self._invalidate_descendants(url)
                 version = res.get("version")
                 if version:
                     self._sds_versioned[f"{url}|{version}"] = res
                 if core:
                     self._core_urls.add(url)
-                if res.get("kind") == "resource" and res.get("derivation") != "constraint" and res.get("abstract") is not True:
+                if (
+                    res.get("kind") == "resource"
+                    and res.get("derivation") != "constraint"
+                    and res.get("abstract") is not True
+                ):
                     if res.get("type"):
                         self._resource_names.add(res["type"])
                 return url
@@ -130,6 +164,26 @@ class ProfileRegistry:
                 return url
             return url or ""
 
+    def _invalidate_descendants(self, url: str) -> None:
+        """A profile changed: drop the generated snapshots of every profile derived from it."""
+        for gen_url in list(self._generated):
+            sd = self._sds.get(gen_url)
+            if sd is None or gen_url == url:
+                continue
+            base, hops = sd.get("baseDefinition"), 0
+            while base and hops < 12:
+                base = base.split("|")[0]
+                if base == url:
+                    self._trees.pop(id(sd), None)
+                    sd.pop("snapshot", None)
+                    self._generated.discard(gen_url)
+                    break
+                parent = self._sds.get(base)
+                base, hops = (
+                    (parent.get("baseDefinition") if parent else None),
+                    hops + 1,
+                )
+
     # ------------------------------------------------------------------ lookups
     def get_by_url(self, url: str | None) -> dict[str, Any] | None:
         """StructureDefinition by canonical (optionally ``url|version``), with snapshot ensured."""
@@ -144,8 +198,11 @@ class ProfileRegistry:
                 if key not in self._generating:  # guard against cyclic baseDefinition
                     self._generating.add(key)
                     try:
-                        generate_snapshot(sd, self)
-                        slim_structure_definition(sd)
+                        if generate_snapshot(sd, self):
+                            self._generated.add(key)
+                            slim_structure_definition(sd, keep_differential=True)
+                        else:
+                            slim_structure_definition(sd)
                     finally:
                         self._generating.discard(key)
         return sd
