@@ -1,0 +1,13 @@
+FHIR R4 Validation Service (pure Python)
+
+This project is an independent Python re-implementation of the REST API of
+"fhir-validator-wrapper" from the Inferno Framework
+(https://github.com/inferno-framework/fhir-validator-wrapper), which wraps the HL7 FHIR
+validator (HAPI). It contains no code from that project; its behaviour was compared against
+it to match results.
+
+Original project: (c) 2024 The MITRE Corporation, licensed under the Apache License 2.0.
+
+The HL7 FHIR R4 definitions in data/ and the US Core package in igs/ are published by HL7
+International (https://hl7.org/fhir/R4/) under their own terms (CC0 for the FHIR specification
+artifacts; see each publication).

@@ -1,0 +1,27 @@
+[project]
+name = "fhir-r4-validator"
+version = "0.2.0"
+description = "FHIR R4 Validation and FHIRPath Evaluation Service in pure Python (FastAPI)"
+readme = "README.md"
+requires-python = ">=3.12"
+
+dependencies = [
+    "fastapi[standard]>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "pydantic>=2.8.0",
+    "pydantic-settings>=2.4.0",
+    "dependency-injector>=4.42.0",
+    "httpx>=0.27.0",
+    "fhirpathpy>=2.2.4",
+    "antlr4-python3-runtime>=4.13.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "tests"]
+filterwarnings = ["ignore::DeprecationWarning"]

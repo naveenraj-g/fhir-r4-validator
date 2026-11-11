@@ -1,0 +1,27 @@
+# Original Java wrapper (kept locally as a reference only, has its own git repo)
+fhir-validator-wrapper/
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+build/
+dist/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Downloaded IG package cache
+.cache/
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
+*.swp

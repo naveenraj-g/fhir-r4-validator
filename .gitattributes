@@ -1,0 +1,2 @@
+# keep the HL7 definition files byte-for-byte (no line-ending conversion)
+data/*.json -text
