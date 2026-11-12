@@ -21,6 +21,7 @@ from app.fhir.parser import ParseError
 from app.routers import api_router
 from app.schemas.operation_outcome import OperationOutcome
 from app.services.ig_service import IgError, IgNotFound
+from app.services.profile_registry import ProfileNotFound, ProtectedDefinition
 
 logger = get_logger(__name__)
 
@@ -81,6 +82,8 @@ def create_app() -> FastAPI:
     app.add_exception_handler(FhirPathError, fhirpath_error_handler)
     app.add_exception_handler(IgNotFound, _ig_not_found_handler)
     app.add_exception_handler(IgError, _ig_error_handler)
+    app.add_exception_handler(ProfileNotFound, _profile_not_found_handler)
+    app.add_exception_handler(ProtectedDefinition, _protected_handler)
     app.add_exception_handler(Exception, generic_exception_handler)
 
     # Permissive CORS headers matching the Spark Java wrapper (added last => outermost, so 503s carry them too)
@@ -98,6 +101,16 @@ def create_app() -> FastAPI:
 async def _ig_not_found_handler(request: Request, exc: IgNotFound) -> JSONResponse:
     outcome = OperationOutcome.from_error(str(exc), "not-found", "error")
     return JSONResponse(status_code=404, content=outcome.model_dump(exclude_none=True), media_type=FHIR_JSON)
+
+
+async def _profile_not_found_handler(request: Request, exc: ProfileNotFound) -> JSONResponse:
+    outcome = OperationOutcome.from_error(str(exc), "not-found", "error")
+    return JSONResponse(status_code=404, content=outcome.model_dump(exclude_none=True), media_type=FHIR_JSON)
+
+
+async def _protected_handler(request: Request, exc: ProtectedDefinition) -> JSONResponse:
+    outcome = OperationOutcome.from_error(str(exc), "forbidden", "error")
+    return JSONResponse(status_code=403, content=outcome.model_dump(exclude_none=True), media_type=FHIR_JSON)
 
 
 async def _ig_error_handler(request: Request, exc: IgError) -> JSONResponse:

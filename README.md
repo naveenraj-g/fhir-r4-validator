@@ -35,6 +35,7 @@ The original Java sources are kept in `fhir-validator-wrapper/` as the reference
 | `GET` | `/resources` | Resource types known to the validator (146 for R4) |
 | `GET` | `/profiles` | All StructureDefinition URLs loaded |
 | `POST` | `/profiles` | Load a StructureDefinition (or ValueSet / CodeSystem), JSON or XML |
+| `DELETE` | `/profiles?url=<canonical url>` | Remove a loaded profile, value set or code system (the HL7 base definitions are protected) |
 | `GET` | `/igs` | IG package id → canonical URL |
 | `GET` | `/profiles-by-ig` | IG package id → profile URLs |
 | `POST` | `/igs` | Load an uploaded `package.tgz` (a `Content-Encoding: gzip` header is fine) |
@@ -52,6 +53,8 @@ The original Java sources are kept in `fhir-validator-wrapper/` as the reference
 | `TX_TIMEOUT_SECONDS` | `10` | Terminology request timeout |
 | `PACKAGE_CACHE_DIR` | `~/.cache/fhir-r4-validator/packages` | Downloaded IG cache |
 | `PACKAGES_REGISTRY_URL` | `https://packages.fhir.org` | NPM-style FHIR registry |
+| `PRELOAD_IGS` | empty | Guides to load at startup, comma separated: `id#version` (or just `id` for the latest) |
+| `PRELOAD_IGS_STRICT` | `false` | If `true`, a guide in `PRELOAD_IGS` that fails to load stops startup |
 | `PACKAGES_OFFLINE` | `false` | Never touch the network for packages (cache only) |
 | `LOG_LEVEL` | `INFO` | |
 
@@ -65,14 +68,19 @@ only. Add what you need:
 | Use a published guide such as **US Core** | `curl -X PUT 'http://localhost:4567/igs/hl7.fhir.us.core?version=3.1.1'`<br>Downloads it from `packages.fhir.org` (with its dependencies) and loads it. Leave out `version` for the latest. |
 | Use **my own package** | `curl -X POST --data-binary @my-package.tgz http://localhost:4567/igs`<br>The id and version are read from the package's `package.json`. |
 | Load **a single profile**, value set or code system | `curl -X POST --data-binary @profile.json http://localhost:4567/profiles` |
-| **Preload** guides at every start | Put the `.tgz` files in the `igs/` folder (or set `IGS_DIR`). They are loaded at startup. |
+| **Remove** a profile, value set or code system | `curl -X DELETE 'http://localhost:4567/profiles?url=<canonical url>'`<br>Use the `url` from the definition. Returns `204`, or `404` if it isn't loaded. The HL7 base definitions cannot be removed (`403`). |
+| **Preload** guides at every start | Put the `.tgz` files in the `igs/` folder (or set `IGS_DIR`), or list them in `PRELOAD_IGS`, for example `PRELOAD_IGS=hl7.fhir.us.core#3.1.1,my.country#1.0.0`. They are loaded at startup, from the package cache or the registry. |
 
 Then validate against a profile with `POST /validate?profile=<canonical url>`, or put the profile in the resource's
 `meta.profile`. Loading a guide does not force it on anything: a resource is only checked against profiles it names
 or that you pass in the request.
 
-Loaded profiles are held in memory. After a restart only what is in `igs/` is loaded again, so keep your packages
-there, or load them again at startup. Downloaded packages are cached on disk (`PACKAGE_CACHE_DIR`), so loading them
+Loaded profiles are held in memory. After a restart only what is in `igs/` or `PRELOAD_IGS` is loaded again, so keep your
+packages there, or load them again at startup. A guide in `PRELOAD_IGS` that cannot be loaded is logged and startup
+continues; set `PRELOAD_IGS_STRICT=true` to stop startup instead.
+
+Removing a profile also stops every profile derived from it from validating, rather than leaving the removed parent's
+rules in place (a derived profile that was loaded with its own full snapshot keeps that snapshot). Downloaded packages are cached on disk (`PACKAGE_CACHE_DIR`), so loading them
 again is fast and works offline.
 
 A package is a standard FHIR package: a `.tgz` containing `package/package.json` (`name`, `version`, `canonical`,

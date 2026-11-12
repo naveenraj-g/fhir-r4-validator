@@ -57,6 +57,8 @@ class IgService:
         cache_dir: Path | None = None,
         registry_url: str | None = None,
         offline: bool | None = None,
+        preload: list[str] | None = None,
+        preload_strict: bool | None = None,
     ) -> None:
         self.registry = registry
         self.igs_dir = igs_dir or settings.igs_dir
@@ -69,8 +71,29 @@ class IgService:
         self._catalogue_cache: dict[str, str] | None = None
         self._catalogue_at = 0.0
         self._load_local_igs()
+        specs = preload if preload is not None else [x.strip() for x in settings.preload_igs.split(",") if x.strip()]
+        self._preload_configured(specs, settings.preload_igs_strict if preload_strict is None else preload_strict)
 
     # ------------------------------------------------------------------ startup
+    def _preload_configured(self, specs: list[str], strict: bool) -> None:
+        """Load the guides named in PRELOAD_IGS (``id#version`` or just ``id``) from the cache or the registry."""
+        for spec in specs:
+            pkg_id, _, version = spec.partition("#")
+            try:
+                self._load_from_registry(pkg_id.strip(), version.strip() or None)
+                logger.info(f"Preloaded IG {spec}")
+            except Exception as e:
+                logger.error(f"Could not preload IG '{spec}': {e}")
+                if strict:
+                    raise IgError(f"Could not preload IG '{spec}': {e}") from e
+
+    def forget_profile(self, url: str) -> None:
+        """Drop a removed profile from the per-IG profile lists."""
+        with self._lock:
+            for pkg in self.loaded.values():
+                if url in pkg.profiles:
+                    pkg.profiles.remove(url)
+
     def _load_local_igs(self) -> None:
         if not self.igs_dir.exists():
             return

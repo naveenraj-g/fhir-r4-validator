@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     packages_catalogue_url: str = Field(
         default="https://packages2.fhir.org/packages/catalog", validation_alias="PACKAGES_CATALOGUE_URL"
     )
+    preload_igs: str = Field(default="", validation_alias="PRELOAD_IGS")
+    preload_igs_strict: bool = Field(default=False, validation_alias="PRELOAD_IGS_STRICT")
     packages_offline: bool = Field(default=False, validation_alias="PACKAGES_OFFLINE")
 
     # Version metadata

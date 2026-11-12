@@ -57,6 +57,14 @@ def slim_structure_definition(
     return sd
 
 
+class ProfileNotFound(LookupError):
+    """No loaded definition has that canonical URL."""
+
+
+class ProtectedDefinition(PermissionError):
+    """The HL7 R4 base definitions that ship with the service cannot be removed."""
+
+
 class ProfileRegistry:
     """In-memory registry of conformance resources (StructureDefinition, ValueSet, CodeSystem)."""
 
@@ -71,6 +79,7 @@ class ProfileRegistry:
         self._trees: dict[int, SnapshotTree] = {}
         self._resource_names: set[str] = set()
         self._core_urls: set[str] = set()
+        self._core_terminology: set[str] = set()  # core ValueSet / CodeSystem URLs (protected)
         self._resource_names.add(
             "DomainResource"
         )  # the Java validator lists the abstract DomainResource too
@@ -145,6 +154,8 @@ class ProfileRegistry:
                 return url
             if rtype == "ValueSet":
                 if url:
+                    if core:
+                        self._core_terminology.add(url)
                     for k in _VS_DROP:
                         res.pop(k, None)
                     self._value_sets[url] = res
@@ -153,6 +164,8 @@ class ProfileRegistry:
                 return url or ""
             if rtype == "CodeSystem":
                 if url:
+                    if core:
+                        self._core_terminology.add(url)
                     for k in _VS_DROP:
                         res.pop(k, None)
                     self._code_systems[url] = res
@@ -163,6 +176,40 @@ class ProfileRegistry:
                 self._others[(rtype, url)] = res
                 return url
             return url or ""
+
+    def remove(self, url: str) -> str:
+        """Remove a loaded StructureDefinition, ValueSet, CodeSystem (or other definition) by canonical URL.
+
+        Profiles derived from a removed profile lose their generated snapshot, so they stop validating
+        (instead of silently keeping the removed parent's rules).
+        """
+        base = url.split("|")[0]
+        with self._lock:
+            if base in self._core_urls or base in self._core_terminology:
+                raise ProtectedDefinition(f"'{base}' is part of the HL7 R4 base definitions and cannot be removed")
+            found = False
+            sd = self._sds.pop(base, None)
+            if sd is not None:
+                found = True
+                for k in [k for k in self._sds_versioned if k.split("|")[0] == base]:
+                    del self._sds_versioned[k]
+                self._trees.pop(id(sd), None)
+                self._generated.discard(base)
+                if sd.get("kind") == "resource" and sd.get("derivation") != "constraint" and sd.get("type"):
+                    self._resource_names.discard(sd["type"])
+            for store in (self._value_sets, self._code_systems):
+                for k in [k for k in store if k.split("|")[0] == base]:
+                    del store[k]
+                    found = True
+            for key in [k for k in self._others if k[1] == base]:
+                del self._others[key]
+                found = True
+            if not found:
+                raise ProfileNotFound(f"No loaded definition has the URL '{base}'")
+            self.generation += 1
+            if sd is not None:
+                self._invalidate_descendants(base)
+        return base
 
     def _invalidate_descendants(self, url: str) -> None:
         """A profile changed: drop the generated snapshots of every profile derived from it."""
