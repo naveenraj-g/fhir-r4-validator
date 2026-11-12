@@ -424,7 +424,14 @@ class TerminologyService:
         if not ok and message and "display" in message.lower() and "wrong" in message.lower():
             # some servers report a display mismatch as a failed result
             wrong_display, ok = True, True
-        if not ok and message and re.search(r"(not found|could not be found|unknown (code )?system|CodeSystem .* not)", message, re.I) and "Unknown code" not in message:
+        # "was not found in the value set" / "Unknown code" are real verdicts; only a missing code system or
+        # value set (the server cannot answer at all) is "unknown".
+        verdict = bool(message) and bool(re.search(r"was not found in the value set|Unknown code|not valid in the code system", message, re.I))
+        cannot_answer = (
+            not ok and not verdict and bool(message)
+            and bool(re.search(r"could not be found|unable to (find|resolve|locate)|unknown (code ?system|value ?set)|(code ?system|value ?set).{0,200}?\bnot (found|known)", message, re.I))
+        )
+        if cannot_answer:
             res = CodeCheck(UNKNOWN, message=message, system_known=False, source="tx")
         else:
             res = CodeCheck(OK if ok else INVALID, message=message, display=server_display, wrong_display=wrong_display, source="tx")

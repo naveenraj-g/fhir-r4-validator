@@ -66,9 +66,78 @@ Validation always returns an OperationOutcome. Each issue has `severity`, `code`
 Example:
 
 ```bash
-curl -s -X POST 'http://localhost:4567/validate?profile=http://hl7.org/fhir/us/core/StructureDefinition/us-core-patient' \
+curl -s -X POST 'http://localhost:4567/validate?profile=<canonical url of a loaded profile>' \
      --data-binary @patient.json
 ```
+
+## Loading profiles and implementation guides
+
+**Nothing is loaded by default** except the HL7 R4 base definitions, so by default you validate against base FHIR R4
+only. Add what you need:
+
+| I want to... | How |
+|---|---|
+| Use a published guide such as **US Core** | `curl -X PUT 'http://localhost:4567/igs/hl7.fhir.us.core?version=3.1.1'`<br>Downloads it from `packages.fhir.org` (with its dependencies) and loads it. Leave out `version` for the latest. |
+| Use **my own package** | `curl -X POST --data-binary @my-package.tgz http://localhost:4567/igs`<br>The id and version are read from the package's `package.json`. |
+| Load **a single profile**, value set or code system | `curl -X POST --data-binary @profile.json http://localhost:4567/profiles` |
+| **Preload** guides at every start | Put the `.tgz` files in the `igs/` folder (or set `IGS_DIR`). They are loaded at startup. |
+
+Then validate against a profile with `POST /validate?profile=<canonical url>`, or put the profile in the resource's
+`meta.profile`. Loading a guide does not force it on anything: a resource is only checked against profiles it names
+or that you pass in the request.
+
+Loaded profiles are held in memory. After a restart only what is in `igs/` is loaded again, so keep your packages
+there, or load them again at startup. Downloaded packages are cached on disk (`PACKAGE_CACHE_DIR`), so loading them
+again is fast and works offline.
+
+A package is a standard FHIR package: a `.tgz` containing `package/package.json` (`name`, `version`, `canonical`,
+`dependencies`) and your StructureDefinitions, ValueSets and CodeSystems as JSON files directly inside `package/`.
+
+## Terminology server
+
+Large code systems (SNOMED CT, LOINC, RxNorm, UCUM) are licensed or too big to bundle. The validator asks a
+**terminology server** whether a code is valid, whether it belongs to a value set, and whether its display text is
+right.
+
+**Value sets you load yourself are checked by the server too.** If you load a value set with 15 SNOMED codes and bind
+it to `Condition.code`, the validator does not compare against your 15 codes on its own. It sends the code and your
+value set definition to the terminology server and reports the server's answer: in the list passes, outside the list is
+an error. Code systems bundled with the validator (the HL7 ones in `data/`, such as gender, observation-category and
+HL7 v2/v3 tables) are decided locally without a server.
+
+| | Terminology server on (default) | Terminology server off (`DISABLE_TX` set) |
+|---|---|---|
+| Code in your value set | passes | warning only: "cannot be validated" |
+| Code outside your value set | error | warning only: "cannot be validated" |
+| Wrong display text | error (warning with `DISPLAY_ISSUES_ARE_WARNINGS`) | not checked for external systems |
+| Server unreachable | warning, validator keeps running | not applicable |
+
+### Which server
+
+- **Default:** HL7's public server `http://tx.fhir.org`, which the validator uses as `https://tx.fhir.org/r4`.
+  The software behind it is open source: https://github.com/HealthIntersections/fhirserver
+- **Your own:** set `TX_SERVER_URL` to its full FHIR R4 base URL (for example `https://tx.example.org/fhir`). It must
+  implement the standard FHIR **R4** terminology operations:
+  - `POST [base]/ValueSet/$validate-code`
+  - `POST [base]/CodeSystem/$validate-code`
+
+  with a FHIR `Parameters` request, answering with `result`, and optionally `message` and `display`. Other open-source
+  servers that follow this API include the
+  [HAPI FHIR JPA server](https://github.com/hapifhir/hapi-fhir-jpaserver-starter) and
+  [Snowstorm](https://github.com/IHTSDO/snowstorm) for SNOMED CT. Only `tx.fhir.org` has been tested with this
+  validator.
+
+### What is sent, and what to plan for
+
+- Only the code, its system, the display text and the value set (the definition of your own value set when you loaded
+  one). No patient data.
+- It needs a network connection to the server. Answers are remembered in memory, so a repeated code is fast and a new
+  code costs one request, usually well under a second.
+- `tx.fhir.org` has no uptime guarantee, so use your own server in production.
+- **Keep it on wherever codes matter**, for example billing and claims, because with it off a wrong code only
+  produces a warning.
+
+Configuration is in `.env.example` (copy it to `.env`).
 
 ## Configuration
 
@@ -76,7 +145,7 @@ curl -s -X POST 'http://localhost:4567/validate?profile=http://hl7.org/fhir/us/c
 |---|---|---|
 | `VALIDATOR_PORT` / `VALIDATOR_HOST` | `4567` / `0.0.0.0` | Listen address |
 | `TX_SERVER_URL` | `http://tx.fhir.org` | Terminology server |
-| `DISABLE_TX` | unset | If set to any value, no terminology server is used (same rule as Java) |
+| `DISABLE_TX` | unset | If set to any value (even `false`), no terminology server is used, same rule as Java |
 | `DISPLAY_ISSUES_ARE_WARNINGS` | `false` | A wrong code display text becomes a warning instead of an error |
 | `TX_TIMEOUT_SECONDS` | `10` | Terminology request timeout |
 | `PACKAGE_CACHE_DIR` | `~/.cache/fhir-r4-validator/packages` | Downloaded IG cache |
@@ -114,7 +183,7 @@ app/
   routers/ schemas/ core/ di/
   main.py           app, startup gate (503 while loading), CORS
 data/               R4 core definitions (resources, types, profiles, extensions, value sets, v2/v3)
-igs/                IGs loaded at startup (US Core 3.1.1)
+igs/                .tgz guides loaded at startup (empty by default)
 tools/compare_with_java.py   comparison against the Java service
 tests/              119 tests
 ```

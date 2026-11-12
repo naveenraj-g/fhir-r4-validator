@@ -5,6 +5,8 @@ from pathlib import Path
 # Match the Java build (tasks.test sets DISABLE_TX=true): unit tests never touch the network.
 os.environ.setdefault("DISABLE_TX", "true")
 os.environ.setdefault("PACKAGES_OFFLINE", "true")
+# The service ships with no implementation guide; the tests preload US Core 3.1.1 from a fixture folder.
+os.environ.setdefault("IGS_DIR", str(Path(__file__).parent / "fixtures" / "igs"))
 
 import pytest
 from fastapi.testclient import TestClient
